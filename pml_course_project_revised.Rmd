@@ -1,0 +1,167 @@
+---
+title: "Practical Machine Learning"
+author: "Sean Dolan"
+date: "Friday, January 29, 2016"
+output: html_document
+---
+## Executive Summary
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+## Load Data
+```{r}
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+trainFile <- "./pml-training.csv"
+testFile  <- "./pml-testing.csv"
+
+trainSet <- read.table("./pml-training.csv", header=TRUE, sep=",")
+
+testSet <- read.table("./pml-testing.csv", header=TRUE, sep=",")
+```
+
+## Explore the data
+### trainSet is a dataframe with 19622 observations of 160 variables
+str(trainSet)
+
+### classe is a factor variable with five levels
+str(trainSet$classe)
+
+## Preprocess the data
+### Remove variables with low variability
+Variables with low variability will not contribute much to the accuracy of ourl model's predictions, so they can be removed. This knocks the number of variables down from 160 to 100.
+
+``` {r}
+library(caret)
+low_var <- nearZeroVar(trainSet, saveMetrics=TRUE)
+
+non_lows <- subset(low_var, nzv == FALSE) 
+dim(non_lows)
+
+## Subset the training data to just these variables
+trainSet <- trainSet[rownames(non_lows)]
+dim(trainSet)
+```
+
+### Eliminate the variables with a large number of missing values
+When this process is completed, we have further knocked down the number of variables to 59.
+
+``` {r}
+na_count <- summary(is.na(trainSet))
+na_count <- sapply(trainSet, function(x) {sum(is.na(x))})
+
+complete_cols <- names(na_count[na_count<19000])
+length(complete_cols)
+
+trainSet2 <-trainSet[, names(trainSet) %in% complete_cols]
+dim(trainSet2)
+
+```
+
+### Remove the first six variables
+An examination of the remaining variables names reveals that the first six appear to jut be labels; they are unlikely to factor into a meaningful analysis.  The number of variables is now 53.
+
+``` {r}
+names(trainSet2)
+trainSet3 <- trainSet2[c(7:59)]
+dim(trainSet3)
+```
+
+### Split the training dataset into training and validation datasets
+Training (60%) and validation (40%) datasets are created.
+
+``` {r}
+set.seed(777)
+inTrain <- createDataPartition(y=trainSet$classe, p=0.6, list=FALSE)
+training <- trainSet3[inTrain,]
+validation <- trainSet3[-inTrain,]
+```
+
+## Modeling
+### Develop Random Forest Model
+The randomForest package was used because some sources claim it to be more efficient than the Random Forest method in the caret package. A 10-fold cross validation was used as the control method. Here is the result of the model and the importance of each predictor.
+
+``` {r}
+library(randomForest)
+cross_folds = trainControl(method = "cv", number = 10)
+
+rfModel <- randomForest(classe ~. , data=training, trControl = cross_folds)
+
+print(rfModel)
+
+rfGini <- importance(rfModel)
+```
+
+### Model Validation and Out of Sample Error
+
+The out-of-sample error is the error, as shown by the accuracy against the validation sample, was very 
+99.11%.  Nonetheless, several other models were developed to see if they could improve upon it.
+
+``` {r}
+rfPred <- predict(rfModel, validation, type = "class")
+confusionMatrix(rfPred, validation$classe)
+```
+
+### Develop Tree Model
+``` {r}
+##library(rpart)
+##treeModel <- train(classe ~ .,method="rpart",data=training)
+##print(treeModel$finalModel)
+
+## Plot the results
+##plot(treeModel$finalModel, uniform=TRUE,main="Classification Tree")
+##text(treeModel$finalModel, use.n=TRUE, all=TRUE, cex=.8)
+
+## Predictions
+##treePred <- predict(treeModel, validation, type = "raw")
+##confusionMatrix(treePred, validation$classe)
+## Accuracy: 49.62% 
+```
+### Develop Boosting (GBM) Model
+``` {r}
+## boostModel <- train(classe ~ ., method="gbm",data=training,verbose=FALSE)
+## print(boostModel)
+
+## Plot the results
+## qplot(predict(boostModel,testing),classe,data=testing)
+
+## Predictions
+## boostPred <- predict(boostModel, validation)
+## confusionMatrix(boostPred, validation$classe)
+## Accuracy:  95.59% 
+```
+
+### Develop Linear Discriminant (LDA) Model
+``` {r}
+## ldaModel <- train(classe ~ .,data=training, method="lda")
+## print(ldaModel)
+
+## Predictions
+## ldaPred <- predict(ldaModel, validation)
+## confusionMatrix(ldaPred, validation$classe)
+## Accuracy: 70.25% 
+```
+
+### Develop Stacking Model
+The stacking model took a very long time to run, which is why the code here is "commented out".  In the end, this model performed identically to the Random ForestModel.
+
+``` {r}
+# Run previously trained models against validation set
+## rfPred2 <- predict(rfModel, validation)
+## boostPred2 <- predict(boostModel, validation)
+## ldaPred2  <- predict(ldaModel, validation)
+## pred2 <- data.frame(rfPred2, boostPred2, ldaPred2, classe=validation$classe)
+
+# Stack the predictions together using Random Forests
+## stackModel <- train(classe ~., data=pred2, method="rf")
+
+# Run the stacked model against the validation set
+## stackPred <- predict(stackModel, validation)
+## confusionMatrix(stackPred, validation$classe)
+## Accuracy: 99.11%
+```
+
